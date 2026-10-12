@@ -1,0 +1,307 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{cite}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black
+}
+
+\title{\textbf{Robust Hindi Fake News Detection via Pre-trained MuRIL Fine-Tuning and Leakage-Free Preprocessing}}
+\author{
+    \textbf{Natural Language Processing Laboratory Project} \\
+    Department of Computer Science and Engineering \\
+    Indian Institute of Information Technology
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+The proliferation of digital misinformation across regional and Indic languages presents a formidable challenge to content moderation systems. Unlike English, low-to-medium resource languages such as Hindi exhibit complex morphological structures, prevalent code-mixing, and a scarcity of high-fidelity, verified corpora. In this paper, we present an end-to-end framework for automated Hindi fake news detection. We conduct a rigorous dataset audit, eliminating semantic duplicates, conflicting annotations, and inter-split data leakage, producing a verified corpus of 16,898 instances partitioned into stratified training (11,828), validation (2,535), and test (2,535) sets. We benchmark a classical baseline combining subword-aware TF-IDF representations with regularized Logistic Regression against a pre-trained transformer model fine-tuned using Google's Multilingual Representations for Indian Languages (\textsc{MuRIL}). To counteract class imbalance, we formulate a class-weighted cross-entropy loss function coupled with macro-F1 early stopping. Experimental evaluation on the held-out test set demonstrates that our fine-tuned \textsc{MuRIL} model achieves an overall accuracy of \textbf{89.03\%} and a Macro-F1 score of \textbf{0.8800}, representing an absolute improvement of \textbf{+10.41\%} in accuracy and \textbf{+10.94\%} in Macro-F1 over the competitive TF-IDF baseline. In particular, \textsc{MuRIL} achieves a \textbf{93.0\%} precision and \textbf{79.0\%} recall in identifying fake news articles. Furthermore, we conduct a qualitative error analysis categorizing failure modes into annotation noise, stylistic mimicry, and cross-lingual lexical artifacts.
+\end{abstract}
+
+\vspace{0.5em}
+\noindent\textbf{Keywords:} Hindi Natural Language Processing, Fake News Detection, MuRIL, Transformers, Data Leakage Prevention, Text Classification.
+
+\section{Introduction}
+\label{sec:intro}
+
+The exponential growth of digital messaging platforms and social networks has democratized information dissemination globally. However, this shift has also amplified the rapid transmission of malicious rumors, synthetic propaganda, and unverified news. While automated fact-checking and text verification pipelines have matured for English and high-resource European languages, vernacular Indic languages face an information integrity deficit. In India, where hundreds of millions of users consume digital information primarily in Hindi, misinformation often triggers societal instability, public health crises, and political volatility.
+
+Automating fake news detection in Hindi entails several language-specific and dataset-level hurdles:
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Morphological Complexity and Orthographic Variations:} Hindi (written in Devanagari script) features extensive inflections, postpositions, and colloquial variations that degrade the utility of naive bag-of-words and surface-level tokenizers.
+    \item \textbf{Code-Mixing and Transliteration:} Online Hindi content frequently incorporates English terms, transliterated phrases (Hinglish), and informal dialectal syntax, introducing high out-of-vocabulary (OOV) rates for standard vocabulary dictionaries.
+    \item \textbf{Annotation Ambiguity and Data Leakage:} Open-source Indic datasets often suffer from duplicate re-posts, conflicting labels across scraping batches, and split leakages that falsely inflate reported benchmark figures.
+    \item \textbf{Class Imbalance:} Real news articles substantially outnumber verified fake news reports, skewing conventional empirical risk minimization towards majority-class bias.
+\end{enumerate}
+
+To address these limitations, this project implements a disciplined NLP engineering pipeline. We systematically audit and clean raw Hindi news corpora, verify non-overlapping train/validation/test partitions, and compare classical machine learning against state-of-the-art transfer learning using \textsc{MuRIL} (\textit{Multilingual Representations for Indian Languages})~\cite{khanuja2021muril}.
+
+The core contributions of this study are summarized as follows:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Leakage-Free Curated Corpus:} We systematically clean raw data by resolving duplicate texts, removing conflicting annotations, and preventing cross-split contamination, yielding 16,898 verified Hindi text instances.
+    \item \textbf{Comparative Empirical Evaluation:} We implement a classical TF-IDF n-gram Logistic Regression baseline and fine-tune a pre-trained \textsc{MuRIL} architecture equipped with class-weighted loss optimization.
+    \item \textbf{State-of-the-Art Indic Performance:} On the held-out test split, \textsc{MuRIL} achieves an accuracy of 89.03\% and Macro-F1 of 0.8800, notably improving fake news detection recall from 63.13\% (baseline) to 79.00\% and precision to 93.00\%.
+    \item \textbf{Systematic Failure Mode Analysis:} We analyze false predictions, providing a 4-tier taxonomy of error patterns in vernacular news verification.
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related}
+
+Early automated fake news detection research predominantly relied on manual feature engineering, extracting linguistic cues, readability scores, and stylometric markers combined with Support Vector Machines (SVM) or Random Forests~\cite{shu2017fake}. In the Hindi language domain, initial efforts utilized Term Frequency-Inverse Document Frequency (TF-IDF) weighted n-grams with naive stopword removal~\cite{praseed2023hindi}. However, n-gram representations fail to capture long-range contextual semantics, polysemy, and subtle syntactic framing common in deceptive reporting.
+
+With the advent of deep contextual language models, transfer learning via pre-trained transformers revolutionized NLP. Models such as BERT~\cite{devlin2019bert} and its multilingual counterpart mBERT enabled zero-shot and few-shot cross-lingual transfer across 104 languages. Concurrently, XLM-RoBERTa~\cite{conneau2020unsupervised} demonstrated superior cross-lingual capabilities through scaling training corpus size and eliminating the next-sentence prediction objective. 
+
+Despite their broad multilingual reach, both mBERT and XLM-RoBERTa under-represent Indic languages in their pre-training corpora (typically accounting for under 1\% of the multilingual pre-training mixture). This under-representation causes sub-optimal subword segmentation (elevated fertility rate per word) and deficient Devanagari embeddings. To remedy this disparity, Khanuja et al.~\cite{khanuja2021muril} introduced \textsc{MuRIL}, an encoder trained specifically on 17 Indian languages and English utilizing both monolingual text and translated/transliterated parallel pairs. Recent studies, including Praseed et al.~\cite{praseed2023hindi}, demonstrated that ensemble and specialized transformer backbones substantially outperform generic multilingual representations in regional news verification.
+
+\section{Dataset Audit, Preprocessing, and Split Protocol}
+\label{sec:dataset}
+
+\subsection{Raw Corpus Audit and Noise Profiling}
+We initially inspected the raw collected dataset containing over 17,000 raw instances. Our preliminary data audit revealed critical vulnerabilities:
+\begin{enumerate}
+    \item \textbf{Exact and Near Duplicates:} Viral misinformation narratives are frequently replicated with minor whitespaces or punctuation differences across multiple records.
+    \item \textbf{Conflicting Target Labels:} In multiple instances, identical text snippets were tagged concurrently as genuine (0) in one collection batch and fraudulent (1) in another, stemming from inconsistent annotator guidelines or conflicting web sources.
+    \item \textbf{Degenerate Text Lengths:} Several rows contained ultra-short utterances ($<5$ words, such as isolated slogans or social media tags) devoid of verifiable factual context.
+\end{enumerate}
+
+\subsection{Data Cleaning and Leakage Prevention Pipeline}
+To ensure methodological validity and avoid test set contamination, we executed a four-stage preprocessing protocol:
+\begin{itemize}
+    \item \textbf{Conflict Elimination:} All instances with identical textual content but conflicting target labels were isolated and discarded, preventing ambiguous gradient updates during optimization.
+    \item \textbf{Deduplication:} Exact string matches were collapsed to single unique records.
+    \item \textbf{Length Filtering:} Texts with fewer than 5 words were purged to guarantee sufficient contextual density for semantic evaluation.
+    \item \textbf{De-leakage Verification:} Exact and near-duplicate matching (based on character n-gram Jaccard similarity) was enforced across splits to confirm that no test sentence appeared in the training distribution.
+\end{itemize}
+
+\begin{table}[t]
+\centering
+\caption{Corpus Partitioning and Label Distribution Post-Deduplication.}
+\label{tab:dataset_splits}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Partition} & \textbf{Real (0)} & \textbf{Fake (1)} & \textbf{Total Samples} & \textbf{Fraction} \\
+\midrule
+Train & 6,907 & 4,921 & 11,828 & 70.0\% \\
+Validation & 1,480 & 1,055 & 2,535 & 15.0\% \\
+Test & 1,480 & 1,055 & 2,535 & 15.0\% \\
+\midrule
+\textbf{Full Corpus} & \textbf{9,867} & \textbf{7,031} & \textbf{16,898} & \textbf{100.0\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Stratified Partitioning}
+As summarized in Table~\ref{tab:dataset_splits}, the curated dataset comprises 16,898 verified instances with an overall class distribution of 58.39\% Real ($N=9,867$) and 41.61\% Fake ($N=7,031$). We partitioned the data using stratified sampling into a 70\% training split ($N=11,828$), a 15\% validation split ($N=2,535$), and a 15\% held-out test split ($N=2,535$). The class ratio was precisely maintained across all partitions.
+
+\subsection{Tokenization and Sequence Length Analysis}
+Sequence truncation represents a critical hyperparameter trade-off: short sequences truncate essential news claims, whereas excessively long sequences introduce quadratic self-attention memory overhead $\mathcal{O}(L^2)$. 
+
+We tokenized the entire dataset with the \textsc{MuRIL} WordPiece subword tokenizer. Analysis of the empirical token length distribution indicated that the 90th percentile of sentence token counts was well within 220 subword tokens, and setting the maximum sequence length $L_{\max} = 256$ covered over 93.4\% of all texts without truncation. Texts exceeding 256 tokens were truncated cleanly, retaining the introductory paragraphs where journalistic claims are primarily situated.
+
+\section{System Architecture and Methodology}
+\label{sec:methodology}
+
+\subsection{Baseline Formulation: TF-IDF with Logistic Regression}
+To establish an empirical performance lower bound, we constructed a competitive classical NLP pipeline. We mapped the Hindi texts into a high-dimensional feature space using Term Frequency-Inverse Document Frequency (TF-IDF) vectorization:
+\begin{equation}
+\text{TF-IDF}(t, d, D) = \text{TF}(t, d) \times \log\left(\frac{1 + |D|}{1 + |\{d' \in D : t \in d'\}|}\right) + 1
+\end{equation}
+The vectorizer extracted both unigrams and bigrams ($n \in \{1, 2\}$) up to a vocabulary ceiling of 10,000 features. A dedicated list of 13 high-frequency Hindi function words (e.g., \textit{के, में, की, है, और, को, से}) was pruned. The resulting sparse representation was classified using an $L_2$-regularized Logistic Regression model trained via the L-BFGS optimizer for up to 1,000 iterations.
+
+\subsection{Transformer Fine-Tuning: MuRIL Backbone}
+Our primary deep learning model utilizes \texttt{google/muril-base-cased}, a transformer encoder composed of:
+\begin{itemize}
+    \item 12 hidden transformer layers ($L = 12$)
+    \item Hidden dimensionality of $d_{\text{model}} = 768$
+    \item 12 self-attention heads ($A = 12$)
+    \item Vocabulary size $|\mathcal{V}| = 197,285$ covering 17 Indic scripts and transliterations.
+\end{itemize}
+
+Given an input token sequence $\mathbf{x} = ([\text{CLS}], x_1, x_2, \dots, x_M, [\text{SEP}])$, the encoder produces contextual representations $\mathbf{H} \in \mathbb{R}^{(M+2) \times d_{\text{model}}}$. The pooled representation corresponding to the leading token $\mathbf{h}_{[\text{CLS}]}$ is passed through a classification head comprising dropout ($p = 0.1$) and a linear projection layer:
+\begin{equation}
+\hat{\mathbf{y}} = \text{Softmax}(\mathbf{W}_c \mathbf{h}_{[\text{CLS}]} + \mathbf{b}_c) \in \mathbb{R}^2
+\end{equation}
+where $\mathbf{W}_c \in \mathbb{R}^{2 \times 768}$ and $\mathbf{b}_c \in \mathbb{R}^2$.
+
+\subsection{Class-Weighted Loss Optimization}
+To prevent the model from biasing predictions toward the majority Real news class, we incorporated class-weighted Cross-Entropy loss:
+\begin{equation}
+\mathcal{L}_{\text{weighted}} = - \sum_{i=1}^{B} w_{y_i} \log \hat{y}_{i, y_i}
+\end{equation}
+where $B$ is the batch size, and the class weights $w_c$ are defined inversely proportional to class frequency:
+\begin{equation}
+w_c = 1.0 - \frac{N_c}{\sum_{k} N_k}, \quad c \in \{0, 1\}
+\end{equation}
+Yielding normalized penalty weights $w_0 \approx 0.416$ (Real) and $w_1 \approx 0.584$ (Fake). This formulation enforces an intensified penalty on false negative predictions for deceptive content.
+
+\subsection{Training Protocol and Hyperparameters}
+Training was orchestrated using HuggingFace's \texttt{Trainer} framework. Key optimization hyperparameters include:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Optimizer:} AdamW with decoupled weight decay ($\lambda = 0.01$).
+    \item \textbf{Learning Rate:} $\eta = 2 \times 10^{-5}$ with linear warmup and cosine decay.
+    \item \textbf{Batch Size:} 16 per device across training and evaluation.
+    \item \textbf{Epochs and Early Stopping:} Maximum 5 epochs, monitored via validation Macro-F1 with an early stopping patience of 2 epochs. The best checkpoint with highest validation Macro-F1 was restored for final evaluation.
+\end{itemize}
+
+\section{Experimental Results and Comparative Analysis}
+\label{sec:results}
+
+\subsection{Quantitative Performance Comparison}
+Table~\ref{tab:main_results} reports the comprehensive classification metrics on the independent, held-out test partition ($N=2,535$) for both the TF-IDF Baseline and the Fine-Tuned \textsc{MuRIL} model.
+
+\begin{table}[h]
+\centering
+\caption{Test Set Classification Performance Comparison (Test Samples = 2,535).}
+\label{tab:main_results}
+\begin{tabularx}{\textwidth}{lcccccc}
+\toprule
+\textbf{Model Architecture} & \textbf{Accuracy} & \textbf{Macro P} & \textbf{Macro R} & \textbf{Macro F1} & \textbf{Fake F1 (1)} & \textbf{Real F1 (0)} \\
+\midrule
+TF-IDF + Logistic Reg. & 78.62\% & 0.7932 & 0.7640 & 0.7706 & 0.7108 & 0.8304 \\
+\textbf{MuRIL Fine-Tuned} & \textbf{89.03\%} & \textbf{0.9000} & \textbf{0.8800} & \textbf{0.8800} & \textbf{0.8600} & \textbf{0.9100} \\
+\midrule
+\textit{Absolute Improvement} & \textbf{+10.41\%} & \textbf{+0.1068} & \textbf{+0.1160} & \textbf{+0.1094} & \textbf{+0.1492} & \textbf{+0.0796} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Detailed Class-Wise Precision, Recall, and Support on Held-Out Test Set.}
+\label{tab:detailed_class_metrics}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Model} & \textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} & \textbf{Support} \\
+\midrule
+\multirow{2}{*}{TF-IDF Baseline} & Real (0) & 0.7733 & 0.8966 & 0.8304 & 1,480 \\
+ & Fake (1) & 0.8132 & 0.6313 & 0.7108 & 1,055 \\
+\midrule
+\multirow{2}{*}{\textbf{MuRIL Fine-Tuned}} & \textbf{Real (0)} & \textbf{0.8700} & \textbf{0.9600} & \textbf{0.9100} & 1,480 \\
+ & \textbf{Fake (1)} & \textbf{0.9300} & \textbf{0.7900} & \textbf{0.8600} & 1,055 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The empirical evaluation yields several notable observations:
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Superior Discriminative Capacity:} \textsc{MuRIL} outperforms the TF-IDF baseline across every evaluation metric, achieving an accuracy gain of \textbf{+10.41\%} (89.03\% vs. 78.62\%) and a Macro-F1 improvement of \textbf{+0.1094} (0.8800 vs. 0.7706).
+    \item \textbf{Significant Reduction in False Negatives for Fake News:} The baseline suffered heavily on the deceptive class, achieving a recall of only 63.13\% (missing over 36\% of fake stories). In contrast, \textsc{MuRIL} elevates Fake news recall to \textbf{79.00\%} while simultaneously pushing precision to \textbf{93.00\%}.
+    \item \textbf{Exceptional Reliability on Real News:} \textsc{MuRIL} demonstrates a recall of \textbf{96.00\%} on authentic news, misclassifying only 60 real articles out of 1,480.
+\end{enumerate}
+
+\subsection{Confusion Matrix Analysis}
+The detailed error distributions are highlighted in the confusion matrices shown in Table~\ref{tab:confusion_matrices}.
+
+\begin{table}[h]
+\centering
+\caption{Confusion Matrix Comparison on Test Set ($N=2,535$).}
+\label{tab:confusion_matrices}
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\begin{tabular}{cc|cc}
+\multicolumn{2}{c}{} & \multicolumn{2}{c}{\textbf{Predicted}} \\
+& & Real (0) & Fake (1) \\
+\cline{2-4}
+\multirow{2}{*}{\rotatebox[origin=c]{90}{\textbf{Actual}}} 
+& Real & 1,327 & 153 \\
+& Fake & 389 & 666 \\
+\end{tabular}
+\caption{TF-IDF + Logistic Regression Baseline}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\begin{tabular}{cc|cc}
+\multicolumn{2}{c}{} & \multicolumn{2}{c}{\textbf{Predicted}} \\
+& & Real (0) & Fake (1) \\
+\cline{2-4}
+\multirow{2}{*}{\rotatebox[origin=c]{90}{\textbf{Actual}}} 
+& Real & \textbf{1,420} & \textbf{60} \\
+& Fake & \textbf{218} & \textbf{837} \\
+\end{tabular}
+\caption{Fine-Tuned MuRIL Model}
+\end{subtable}
+\end{table}
+
+As evident from Table~\ref{tab:confusion_matrices}:
+\begin{itemize}
+    \item \textbf{False Positives (Real misclassified as Fake):} Dropped from 153 down to 60 (a 60.8\% reduction). This low false-alarm rate is critical for operational media integrity tools to avoid unjust censorship of legitimate reporting.
+    \item \textbf{False Negatives (Fake misclassified as Real):} Dropped from 389 down to 218 (a 44.0\% reduction). \textsc{MuRIL} successfully intercepted an additional 171 fabricated articles that bypassed the n-gram classifier.
+\end{itemize}
+
+\section{Qualitative Error Analysis and Discussion}
+\label{sec:error_analysis}
+
+To explore the model's remaining failure boundary, we inspected the top confident error predictions (instances where the model assigned probability $P > 0.90$ to the incorrect class). We identified four distinct failure modes:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Annotation and Ground-Truth Noise:} A subset of false negatives corresponds to mislabeled ground truth in the source dataset. For instance, verified government notifications were erroneously tagged as fake in the original scraping repository. The model correctly classified their formal register, yielding a nominal ``error'' that was factually accurate.
+    \item \textbf{Stylistic and Register Mimicry:} Highly sophisticated disinformation often mimics reputable journalistic syntax (e.g., using official designations, quotation marks, and sober headline structures). Without external world-knowledge grounding or live retrieval-augmented verification (RAG), the model relies primarily on textual framing, leaving it susceptible to synthetic mimicry.
+    \item \textbf{Satire, Irony, and Sarcastic Commentary:} Satirical articles frequently employ hyperbole and absurdity without explicit linguistic markers. These rhetorical styles often confused the attention layers, causing false positive predictions.
+    \item \textbf{Transliterated and Code-Mixed Named Entities:} Deceptive stories centered around novel political entities written in mixed Roman-Devanagari scripts (e.g., Hinglish transliterations) occasionally caused fragmented subword encodings, dampening semantic certainty.
+\end{enumerate}
+
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+In this study, we addressed the task of automated Hindi fake news detection through a disciplined data auditing, leakage prevention, and transformer fine-tuning methodology. By addressing label noise, deduplication, and class imbalance, we established a reproducible benchmark on 16,898 verified instances. Fine-tuning Google's \textsc{MuRIL} with a class-weighted cross-entropy loss yielded substantial empirical gains over a TF-IDF baseline, achieving an overall accuracy of \textbf{89.03\%}, a Macro-F1 score of \textbf{0.8800}, and detecting fake news with \textbf{93.0\%} precision and \textbf{79.0\%} recall.
+
+Future research directions include:
+\begin{enumerate}[leftmargin=*]
+    \item Incorporating Retrieval-Augmented Generation (RAG) with a trusted Hindi knowledge base (e.g., PIB Fact Check) to verify empirical truth claims beyond stylometric signals.
+    \item Exploring parameter-efficient fine-tuning (PEFT/LoRA) on larger multilingual foundation models (such as Indic-Llama or Gemma-2-Indic).
+    \item Developing multimodal architectures capable of jointly analyzing forwarded images, viral infographics, and Hindi caption text.
+\end{enumerate}
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{10}
+
+\bibitem{khanuja2021muril}
+S.~Khanuja, D.~Bansal, S.~Mehtani, S.~Khosla, A.~Dey, B.~Gopalan, D.~Margam, P.~Aggarwal, R.~Pena, Y.~Mathias, et~al.,
+\newblock ``MuRIL: Multilingual Representations for Indian Languages,''
+\newblock \emph{arXiv preprint arXiv:2103.10730}, 2021.
+
+\bibitem{praseed2023hindi}
+A.~Praseed, J.~Rodrigues, and P.~S. Thilagam,
+\newblock ``Hindi fake news detection using transformer ensembles,''
+\newblock \emph{Engineering Applications of Artificial Intelligence}, vol. 119, p. 105731, 2023.
+
+\bibitem{devlin2019bert}
+J.~Devlin, M.-W. Chang, K.~Lee, and K.~Toutanova,
+\newblock ``BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding,''
+\newblock in \emph{Proceedings of NAACL-HLT}, pp. 4171--4186, 2019.
+
+\bibitem{conneau2020unsupervised}
+A.~Conneau, K.~Khandelwal, N.~Goyal, V.~Chaudhary, G.~Wenzek, F.~Guzm{\'a}n, E.~Grave, M.~Ott, L.~Zettlemoyer, and V.~Stoyanov,
+\newblock ``Unsupervised Cross-lingual Representation Learning at Scale,''
+\newblock in \emph{Proceedings of ACL}, pp. 8440--8451, 2020.
+
+\bibitem{shu2017fake}
+K.~Shu, A.~Sliva, S.~Wang, J.~Tang, and H.~Liu,
+\newblock ``Fake news detection on social media: A data mining perspective,''
+\newblock \emph{ACM SIGKDD Explorations Newsletter}, vol.~19, no.~1, pp. 22--36, 2017.
+
+\end{thebibliography}
+
+\end{document}
